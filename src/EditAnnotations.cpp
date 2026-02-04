@@ -1068,6 +1068,22 @@ void EditAnnotationsWindow::ListBoxSelectionChanged() {
 static UINT_PTR gMainWindowRerenderTimer = 0;
 static MainWindow* gMainWindowForRender = nullptr;
 
+static const char* MapAnnotFontToBase14(const char* pdfFontName) {
+    if (str::IsEmptyOrWhiteSpace(pdfFontName)) {
+        return "Helvetica";
+    }
+    if (str::EqI(pdfFontName, "Helv") || str::EqI(pdfFontName, "Helvetica")) {
+        return "Helvetica";
+    }
+    if (str::EqI(pdfFontName, "Cour") || str::EqI(pdfFontName, "Courier")) {
+        return "Courier";
+    }
+    if (str::EqI(pdfFontName, "TiRo") || str::EqI(pdfFontName, "Times") || str::EqI(pdfFontName, "Times-Roman")) {
+        return "Times-Roman";
+    }
+    return pdfFontName;
+}
+
 // Auto-resize FreeText annotation based on content
 static void AutoResizeFreeTextAnnotation(Annotation* annot, const char* text) {
     if (Type(annot) != AnnotationType::FreeText) {
@@ -1103,40 +1119,59 @@ static void AutoResizeFreeTextAnnotation(Annotation* annot, const char* text) {
         borderWidth = 1;
     }
     
-    // Calculate text dimensions
-    // Count lines and find maximum line width
-    int lineCount = 1;
-    int maxLineLen = 0;
-    int currentLineLen = 0;
-    
-    for (const char* p = text; *p; p++) {
-        if (*p == '\n') {
-            lineCount++;
-            if (currentLineLen > maxLineLen) {
-                maxLineLen = currentLineLen;
-            }
-            currentLineLen = 0;
-        } else {
-            currentLineLen++;
+    // Measure text dimensions using font metrics
+    const char* pdfFontName = DefaultAppearanceTextFont(annot);
+    const char* base14Name = MapAnnotFontToBase14(pdfFontName);
+    fz_font* font = nullptr;
+    fz_try(ctx) {
+        font = fz_new_base14_font(ctx, base14Name);
+        if (!font) {
+            font = fz_new_base14_font(ctx, "Helvetica");
         }
     }
-    if (currentLineLen > maxLineLen) {
-        maxLineLen = currentLineLen;
+    fz_catch(ctx) {
+        fz_report_error(ctx);
+        font = nullptr;
     }
-    
-    // Estimate character width (approximate for monospace-like calculation)
-    // For proportional fonts, this is a rough estimate
-    float charWidth = fontSize * 0.6f; // Approximate width per character
-    float lineHeight = fontSize * 1.15f; // Line height with minimal spacing
+    if (!font) {
+        return;
+    }
+
+    int lineCount = 0;
+    float maxLineWidth = 0.0f;
+    const char* lineStart = text;
+    for (const char* p = text; ; p++) {
+        if (*p == '\n' || *p == '\0') {
+            int len = (int)(p - lineStart);
+            TempStr line = str::DupTemp(lineStart, len);
+            fz_matrix trm = fz_scale((float)fontSize, (float)fontSize);
+            fz_matrix adv = fz_measure_string(ctx, font, trm, line ? line : "", 0, 0, FZ_BIDI_LTR, FZ_LANG_UNSET);
+            float width = fabsf(adv.e);
+            if (width > maxLineWidth) {
+                maxLineWidth = width;
+            }
+            lineCount++;
+            if (*p == '\0') {
+                break;
+            }
+            lineStart = p + 1;
+        }
+    }
+
+    float pxToPt = 72.0f / (float)USER_DEFAULT_SCREEN_DPI;
+    float extraLeadingPx = 2.5f * ((float)fontSize / 9.0f);
+    float extraLeading = extraLeadingPx * pxToPt;
+    float lineHeight = (float)fontSize + extraLeading;
+    fz_drop_font(ctx, font);
     
     // Calculate required dimensions with minimal padding
     // Tight padding: just border width + small text margin
-    float horizontalPadding = borderWidth + 4.0f; // Minimal left/right padding
-    float verticalPadding = borderWidth + 2.0f;   // Minimal top/bottom padding
+    float horizontalPadding = borderWidth + (7.0f * pxToPt); // Minimal left/right padding
+    float verticalPadding = 0.0f;
     float minWidth = 50.0f; // Minimum width
-    float minHeight = fontSize * 1.15f; // Minimum height for one line
+    float minHeight = (float)fontSize + extraLeading; // Minimum height for one line
     
-    float requiredWidth = (maxLineLen * charWidth) + horizontalPadding;
+    float requiredWidth = maxLineWidth + horizontalPadding;
     float requiredHeight = (lineCount * lineHeight) + verticalPadding;
     
     // Ensure minimum sizes

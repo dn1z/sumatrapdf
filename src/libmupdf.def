@@ -246,6 +246,8 @@ EXPORTS
 	fz_new_font_from_file
 	fz_keep_font
 	fz_drop_font
+	fz_new_base14_font
+	fz_measure_string
 	fz_set_font_bbox
 	fz_bound_glyph
 	fz_glyph_cacheable
