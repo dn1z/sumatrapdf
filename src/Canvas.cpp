@@ -968,6 +968,22 @@ static void OnMouseLeftButtonDblClk(MainWindow* win, int x, int y, WPARAM key) {
             dm->textSelection->SelectWordAt(pageNo, pt.x, pt.y);
             UpdateTextSelection(win, false);
             ScheduleRepaint(win, 0);
+            int wordStart = 0;
+            int wordEnd = 0;
+            if (dm->textSelection->GetWordRangeAt(pageNo, pt.x, pt.y, &wordStart, &wordEnd)) {
+                win->wordSelectionDrag = true;
+                win->wordSelectionAnchorPage = pageNo;
+                win->wordSelectionAnchorStartGlyph = wordStart;
+                win->wordSelectionAnchorEndGlyph = wordEnd;
+                win->selectionRect = Rect(x, y, 0, 0);
+                win->showSelection = true;
+                win->mouseAction = MouseAction::SelectingText;
+                win->dragStartPending = false;
+                SetCapture(win->hwndCanvas);
+                SetTimer(win->hwndCanvas, SMOOTHSCROLL_TIMER_ID, SMOOTHSCROLL_DELAY_IN_MS, nullptr);
+            } else {
+                win->wordSelectionDrag = false;
+            }
         }
         return;
     }

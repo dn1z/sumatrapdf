@@ -191,7 +191,27 @@ void UpdateTextSelection(MainWindow* win, bool select) {
         int pageNo = dm->GetPageNoByPoint(win->selectionRect.BR());
         if (win->ctrl->ValidPageNo(pageNo)) {
             PointF pt = dm->CvtFromScreen(win->selectionRect.BR(), pageNo);
-            dm->textSelection->SelectUpTo(pageNo, pt.x, pt.y);
+            if (win->wordSelectionDrag) {
+                int wordStart = 0;
+                int wordEnd = 0;
+                if (dm->textSelection->GetWordRangeAt(pageNo, pt.x, pt.y, &wordStart, &wordEnd)) {
+                    bool isBeforeAnchor = pageNo < win->wordSelectionAnchorPage ||
+                                          (pageNo == win->wordSelectionAnchorPage &&
+                                           wordEnd <= win->wordSelectionAnchorStartGlyph);
+                    if (isBeforeAnchor) {
+                        dm->textSelection->StartAt(pageNo, wordStart);
+                        dm->textSelection->SelectUpTo(win->wordSelectionAnchorPage, win->wordSelectionAnchorEndGlyph);
+                    } else {
+                        dm->textSelection->StartAt(win->wordSelectionAnchorPage,
+                                                   win->wordSelectionAnchorStartGlyph);
+                        dm->textSelection->SelectUpTo(pageNo, wordEnd);
+                    }
+                } else {
+                    dm->textSelection->SelectUpTo(pageNo, pt.x, pt.y);
+                }
+            } else {
+                dm->textSelection->SelectUpTo(pageNo, pt.x, pt.y);
+            }
         }
     }
 
@@ -376,6 +396,7 @@ void OnSelectionEdgeAutoscroll(MainWindow* win, int x, int y) {
 void OnSelectionStart(MainWindow* win, int x, int y, WPARAM) {
     ReportIf(!win->AsFixed());
     DeleteOldSelectionInfo(win, true);
+    win->wordSelectionDrag = false;
 
     win->selectionRect = Rect(x, y, 0, 0);
     win->showSelection = true;
@@ -408,8 +429,11 @@ void OnSelectionStop(MainWindow* win, int x, int y, bool aborted) {
 
     // update the text selection before changing the selectionRect
     if (MouseAction::SelectingText == win->mouseAction) {
+        win->selectionRect.dx = x - win->selectionRect.x;
+        win->selectionRect.dy = y - win->selectionRect.y;
         UpdateTextSelection(win);
     }
+    win->wordSelectionDrag = false;
 
     win->selectionRect = Rect::FromXY(win->selectionRect.x, win->selectionRect.y, x, y);
     if (aborted || (MouseAction::Selecting == win->mouseAction ? win->selectionRect.IsEmpty()

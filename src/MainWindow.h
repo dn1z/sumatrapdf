@@ -188,6 +188,11 @@ struct MainWindow {
     Rect selectionRect;
     // size of the current rectangular selection in document units
     SizeF selectionMeasure;
+    // true while extending a double-click word selection
+    bool wordSelectionDrag = false;
+    int wordSelectionAnchorPage = 0;
+    int wordSelectionAnchorStartGlyph = 0;
+    int wordSelectionAnchorEndGlyph = 0;
 
     // a list of static links (mainly used for About and Frequently Read pages)
     Vec<StaticLinkInfo*> staticLinks;

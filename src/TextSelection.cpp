@@ -274,9 +274,24 @@ void TextSelection::SelectUpTo(int pageNo, int glyphIx) {
 }
 
 void TextSelection::SelectWordAt(int pageNo, double x, double y) {
+    int wordStart = 0;
+    int wordEnd = 0;
+    if (!GetWordRangeAt(pageNo, x, y, &wordStart, &wordEnd)) {
+        return;
+    }
+    StartAt(pageNo, wordStart);
+    SelectUpTo(pageNo, wordEnd);
+}
+
+bool TextSelection::GetWordRangeAt(int pageNo, double x, double y, int* wordStart, int* wordEnd) {
     int i = FindClosestGlyph(this, pageNo, x, y);
     int textLen;
     const WCHAR* text = textCache->GetTextForPage(pageNo, &textLen);
+    if (textLen <= 0) {
+        *wordStart = 0;
+        *wordEnd = 0;
+        return false;
+    }
 
     bool isAllDigits = true;
     WCHAR c = 0;
@@ -289,7 +304,7 @@ void TextSelection::SelectWordAt(int pageNo, double x, double y) {
             isAllDigits = false;
         }
     }
-    int wordStart = i;
+    int start = i;
     int maybeNumberStart = i;
     int nDigits = 0;
     if (isAllDigits && c == '.') {
@@ -320,10 +335,10 @@ void TextSelection::SelectWordAt(int pageNo, double x, double y) {
 
     // try to select fractional numbers i.e. if c is '.', chars before are all digits and chars after are all digits,
     // extend to digits
-    int wordEnd = i;
+    int end = i;
     nDigits = 0;
     if (isAllDigits && c == '.') {
-        for (int j = wordEnd + 1; j < textLen; j++) {
+        for (int j = end + 1; j < textLen; j++) {
             c = text[j];
             if (isDigit(c)) {
                 nDigits++;
@@ -332,14 +347,15 @@ void TextSelection::SelectWordAt(int pageNo, double x, double y) {
             break;
         }
         if (nDigits > 0) {
-            wordEnd += nDigits + 1; // +1 for '.'
+            end += nDigits + 1; // +1 for '.'
         }
     }
     if (isAllDigits) {
-        wordStart = maybeNumberStart;
+        start = maybeNumberStart;
     }
-    StartAt(pageNo, wordStart);
-    SelectUpTo(pageNo, wordEnd);
+    *wordStart = start;
+    *wordEnd = end;
+    return true;
 }
 
 void TextSelection::CopySelection(TextSelection* orig) {
