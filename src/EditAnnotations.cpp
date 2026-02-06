@@ -183,6 +183,9 @@ struct EditAnnotationsWindow : Wnd {
 // Forward declarations
 static void AddAnnotationToList(EditAnnotationsWindow* ew, Annotation* annot);
 static void RebuildAnnotationsListBox(EditAnnotationsWindow* ew);
+static bool ShouldPositionEditAnnotLeft(WindowTab* tab);
+static void PositionEditAnnotationsWindowLeft(EditAnnotationsWindow* ew);
+static void PositionEditAnnotationsWindowRight(EditAnnotationsWindow* ew);
 
 #if 0
 static Annotation* PickNewSelectedAnnotation(EditAnnotationsWindow* ew, int prevIdx) {
@@ -1012,6 +1015,11 @@ void SetSelectedAnnotation(WindowTab* tab, Annotation* annot, bool setEditFocus)
             AddAnnotationToList(ew, annot);
         }
         UpdateUIForSelectedAnnotation(ew, annot, setEditFocus);
+        if (annot && ShouldPositionEditAnnotLeft(tab)) {
+            PositionEditAnnotationsWindowLeft(ew);
+        } else if (annot) {
+            PositionEditAnnotationsWindowRight(ew);
+        }
         HwndMakeVisible(ew->hwnd);
     }
     MainWindowRerender(win);
@@ -1699,6 +1707,45 @@ static void CreateMainLayout(EditAnnotationsWindow* ew) {
     HidePerAnnotControls(ew);
 }
 
+static bool ShouldPositionEditAnnotLeft(WindowTab* tab) {
+    if (!tab) {
+        return false;
+    }
+    MainWindow* win = tab->win;
+    if (win && win->hwndCanvas) {
+        POINT pt{};
+        if (GetCursorPos(&pt)) {
+            ScreenToClient(win->hwndCanvas, &pt);
+            Rect canvas = ClientRect(win->hwndCanvas);
+            Point ptClient{pt.x, pt.y};
+            if (canvas.Contains(ptClient)) {
+                return ptClient.x >= (int)(canvas.dx * 0.4f);
+            }
+        }
+    }
+    return false;
+}
+
+static void PositionEditAnnotationsWindowLeft(EditAnnotationsWindow* ew) {
+    if (!ew || !ew->tab) {
+        return;
+    }
+    MainWindow* win = ew->tab->win;
+    Rect work = GetWorkAreaRect(WindowRect(win->hwndFrame), win->hwndFrame);
+    Rect r = WindowRect(ew->hwnd);
+    r.x = work.x;
+    r.y = WindowRect(win->hwndFrame).y;
+    r = ShiftRectToWorkArea(r, win->hwndFrame, true);
+    SetWindowPos(ew->hwnd, nullptr, r.x, r.y, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
+}
+
+static void PositionEditAnnotationsWindowRight(EditAnnotationsWindow* ew) {
+    if (!ew || !ew->tab) {
+        return;
+    }
+    HwndPositionToTheRightOf(ew->hwnd, ew->tab->win->hwndFrame);
+}
+
 void ShowEditAnnotationsWindow(WindowTab* tab) {
     auto dm = tab ? tab->AsFixed() : nullptr;
     auto engine = dm ? dm->GetEngine() : nullptr;
@@ -1760,14 +1807,15 @@ void ShowEditAnnotationsWindow(WindowTab* tab) {
         ew->listBox->idealSizeLines = 14;
     }
 
-    if (lastPos.IsEmpty()) {
-        LayoutAndSizeToContent(ew->mainLayout, 520, minDy, ew->hwnd);
-        HwndPositionToTheRightOf(ew->hwnd, tab->win->hwndFrame);
+    int dx = lastPos.dx;
+    if (dx == 0) {
+        dx = 520;
+    }
+    LayoutAndSizeToContent(ew->mainLayout, dx, minDy, ew->hwnd);
+    if (ShouldPositionEditAnnotLeft(tab)) {
+        PositionEditAnnotationsWindowLeft(ew);
     } else {
-        int dx = lastPos.dx;
-        LayoutAndSizeToContent(ew->mainLayout, dx, minDy, ew->hwnd);
-        Rect r = ShiftRectToWorkArea(lastPos, ew->hwnd, true);
-        SetWindowPos(ew->hwnd, nullptr, r.x, r.y, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
+        PositionEditAnnotationsWindowRight(ew);
     }
     Annotation* annot = ew->tab->selectedAnnotation;
     ew->skipGoToPage = (annot != nullptr);
