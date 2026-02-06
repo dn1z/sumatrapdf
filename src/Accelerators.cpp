@@ -111,10 +111,10 @@ ACCEL gBuiltInAccelerators[] = {
     {FSHIFT | FVIRTKEY, VK_RETURN, CmdScrollUpPage},
     {FCONTROL | FVIRTKEY, VK_UP, CmdScrollUpPage},
 
-    {0, 'n', CmdGoToNextPage},
+    // {0, 'n', CmdGoToNextPage},
     //{FCONTROL | FVIRTKEY, VK_NEXT, CmdGoToNextPage},
 
-    {0, 'p', CmdGoToPrevPage},
+    // {0, 'p', CmdGoToPrevPage},
     //{FCONTROL | FVIRTKEY, VK_PRIOR, CmdGoToPrevPage},
 
     {FVIRTKEY, VK_HOME, CmdGoToFirstPage},
