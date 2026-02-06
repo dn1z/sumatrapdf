@@ -6,6 +6,10 @@ extern "C" {
 #include <mupdf/pdf.h>
 }
 
+#include <cctype>
+#include <string>
+#include <unordered_map>
+
 #include "utils/BaseUtil.h"
 #include "utils/BitManip.h"
 #include "utils/FileUtil.h"
@@ -186,6 +190,7 @@ static void RebuildAnnotationsListBox(EditAnnotationsWindow* ew);
 static bool ShouldPositionEditAnnotLeft(WindowTab* tab);
 static void PositionEditAnnotationsWindowLeft(EditAnnotationsWindow* ew);
 static void PositionEditAnnotationsWindowRight(EditAnnotationsWindow* ew);
+static fz_font* GetCachedFont(fz_context* ctx, const char* fontName);
 
 #if 0
 static Annotation* PickNewSelectedAnnotation(EditAnnotationsWindow* ew, int prevIdx) {
@@ -639,13 +644,13 @@ static void TextFontSizeChanging(EditAnnotationsWindow* ew, Trackbar::PositionCh
     SetDefaultAppearanceTextSize(annot, fontSize);
     TempStr s = str::FormatTemp(_TRA("Text Size: %d"), fontSize);
     ew->staticTextSize->SetText(s);
-    
+
     // Auto-resize FreeText annotations when font size changes
     if (Type(annot) == AnnotationType::FreeText) {
         TempStr txt = Contents(annot);
         AutoResizeFreeTextAnnotation(annot, txt);
     }
-    
+
     EnableSaveIfAnnotationsChanged(ew);
     MainWindowRerender(ew->tab->win);
 }
@@ -1108,39 +1113,29 @@ static void AutoResizeFreeTextAnnotation(Annotation* annot, const char* text) {
 
     auto ctx = engine->Ctx();
     int pageNo = PageNo(annot);
-    
+
     // Get current annotation rect
     RectF currentRect = GetRect(annot);
-    
+
     // Get page bounds to respect page boundaries
     RectF pageMediabox = engine->PageMediabox(pageNo);
-    
+
     // Get font size
     int fontSize = DefaultAppearanceTextSize(annot);
     if (fontSize <= 0) {
         fontSize = 12; // default
     }
-    
+
     // Get border width to account for padding
     int borderWidth = BorderWidth(annot);
     if (borderWidth < 0) {
         borderWidth = 1;
     }
-    
+
     // Measure text dimensions using font metrics
     const char* pdfFontName = DefaultAppearanceTextFont(annot);
     const char* base14Name = MapAnnotFontToBase14(pdfFontName);
-    fz_font* font = nullptr;
-    fz_try(ctx) {
-        font = fz_new_base14_font(ctx, base14Name);
-        if (!font) {
-            font = fz_new_base14_font(ctx, "Helvetica");
-        }
-    }
-    fz_catch(ctx) {
-        fz_report_error(ctx);
-        font = nullptr;
-    }
+    fz_font* font = GetCachedFont(ctx, base14Name);
     if (!font) {
         return;
     }
@@ -1170,18 +1165,16 @@ static void AutoResizeFreeTextAnnotation(Annotation* annot, const char* text) {
     float extraLeadingPx = 2.5f * ((float)fontSize / 9.0f);
     float extraLeading = extraLeadingPx * pxToPt;
     float lineHeight = (float)fontSize + extraLeading;
-    fz_drop_font(ctx, font);
-    
     // Calculate required dimensions with minimal padding
     // Tight padding: just border width + small text margin
     float horizontalPadding = borderWidth + (7.0f * pxToPt); // Minimal left/right padding
     float verticalPadding = 0.0f;
     float minWidth = 50.0f; // Minimum width
     float minHeight = (float)fontSize + extraLeading; // Minimum height for one line
-    
+
     float requiredWidth = maxLineWidth + horizontalPadding;
     float requiredHeight = (lineCount * lineHeight) + verticalPadding;
-    
+
     // Ensure minimum sizes
     if (requiredWidth < minWidth) {
         requiredWidth = minWidth;
@@ -1189,12 +1182,12 @@ static void AutoResizeFreeTextAnnotation(Annotation* annot, const char* text) {
     if (requiredHeight < minHeight) {
         requiredHeight = minHeight;
     }
-    
+
     // Create new rect with same position but adjusted size
     RectF newRect = currentRect;
     newRect.dx = requiredWidth;
     newRect.dy = requiredHeight;
-    
+
     // Constrain to page bounds
     if (newRect.x + newRect.dx > pageMediabox.x + pageMediabox.dx) {
         newRect.dx = (pageMediabox.x + pageMediabox.dx) - newRect.x;
@@ -1203,7 +1196,7 @@ static void AutoResizeFreeTextAnnotation(Annotation* annot, const char* text) {
             newRect.dx = minWidth;
         }
     }
-    
+
     if (newRect.y + newRect.dy > pageMediabox.y + pageMediabox.dy) {
         newRect.dy = (pageMediabox.y + pageMediabox.dy) - newRect.y;
         if (newRect.dy < minHeight) {
@@ -1211,11 +1204,11 @@ static void AutoResizeFreeTextAnnotation(Annotation* annot, const char* text) {
             newRect.dy = minHeight;
         }
     }
-    
+
     // Only update if size changed significantly (avoid micro-adjustments)
     float widthDiff = fabs(newRect.dx - currentRect.dx);
     float heightDiff = fabs(newRect.dy - currentRect.dy);
-    
+
     if (widthDiff > 1.0f || heightDiff > 1.0f) {
         SetRect(annot, newRect);
     }
@@ -1232,10 +1225,12 @@ static void ContentsChanged(EditAnnotationsWindow* ew) {
     auto txt = ew->editContents->GetTextTemp();
     txt = str::ReplaceTemp(txt, "\r\n", "\n");
     SetContents(a, txt);
-    
-    // Auto-resize FreeText annotations
-    AutoResizeFreeTextAnnotation(a, txt);
-    
+
+    // Auto-resize FreeText annotations immediately to avoid stale selection timing issues
+    if (a->type == AnnotationType::FreeText) {
+        AutoResizeFreeTextAnnotation(a, txt);
+    }
+
     EnableSaveIfAnnotationsChanged(ew);
 
     MainWindow* win = ew->tab->win;
@@ -1244,7 +1239,7 @@ static void ContentsChanged(EditAnnotationsWindow* ew) {
         KillTimer(win->hwndCanvas, gMainWindowRerenderTimer);
         gMainWindowRerenderTimer = 0;
     }
-    UINT timeoutInMs = 1000;
+    UINT timeoutInMs = 50;
     gMainWindowForRender = win;
     gMainWindowRerenderTimer = SetTimer(win->hwndCanvas, 1, timeoutInMs, [](HWND, UINT, UINT_PTR, DWORD) {
         if (IsMainWindowValid(gMainWindowForRender)) {
@@ -1744,6 +1739,45 @@ static void PositionEditAnnotationsWindowRight(EditAnnotationsWindow* ew) {
         return;
     }
     HwndPositionToTheRightOf(ew->hwnd, ew->tab->win->hwndFrame);
+}
+
+static fz_font* GetCachedFont(fz_context* ctx, const char* fontName) {
+    if (!ctx || !fontName) {
+        return nullptr;
+    }
+
+    static fz_context* cachedCtx = nullptr;
+    static std::unordered_map<std::string, fz_font*> cachedFonts;
+
+    if (cachedCtx != ctx) {
+        cachedFonts.clear();
+        cachedCtx = ctx;
+    }
+
+    const char* keyName = fontName && *fontName ? fontName : "Helvetica";
+    std::string key(keyName);
+    for (char& c : key) {
+        c = (char)tolower((unsigned char)c);
+    }
+    auto it = cachedFonts.find(key);
+    if (it != cachedFonts.end()) {
+        return it->second;
+    }
+
+    fz_font* font = nullptr;
+    fz_try(ctx) {
+        font = fz_new_base14_font(ctx, keyName);
+        if (!font) {
+            font = fz_new_base14_font(ctx, "Helvetica");
+        }
+    }
+    fz_catch(ctx) {
+        fz_report_error(ctx);
+        font = nullptr;
+    }
+
+    cachedFonts[key] = font;
+    return font;
 }
 
 void ShowEditAnnotationsWindow(WindowTab* tab) {
