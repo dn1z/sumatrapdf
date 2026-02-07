@@ -144,7 +144,7 @@ ACCEL gBuiltInAccelerators[] = {
     {FCONTROL | FVIRTKEY, 'D', CmdProperties},
     {FCONTROL | FVIRTKEY, 'F', CmdFindFirst},
     {FCONTROL | FVIRTKEY, 'G', CmdGoToPage},
-    {0, 'g', CmdGoToPage},
+    {0, 'G', CmdGoToPage},
     {FCONTROL | FVIRTKEY, 'K', CmdCommandPalette},
     //{FALT | FVIRTKEY, 'K', CmdCommandPaletteOnlyTabs}, // removed in 3.6
     {FSHIFT | FCONTROL | FVIRTKEY, 'S', CmdSaveAnnotations},
@@ -209,7 +209,7 @@ ACCEL gBuiltInAccelerators[] = {
     {0, 'T', CmdCreateAnnotFreeText},
 
     {0, 'I', CmdInvertColors},
-    {0, 'i', CmdTogglePageInfo},
+    // {0, 'i', CmdTogglePageInfo},
 
     {FCONTROL | FVIRTKEY, VK_DELETE, CmdDeleteAnnotation},
 
