@@ -1102,7 +1102,7 @@ static void AutoResizeFreeTextAnnotation(Annotation* annot, const char* text) {
     if (Type(annot) != AnnotationType::FreeText) {
         return;
     }
-    if (!text || !*text) {
+    if (!text) {
         return;
     }
 
@@ -1169,7 +1169,7 @@ static void AutoResizeFreeTextAnnotation(Annotation* annot, const char* text) {
     // Tight padding: just border width + small text margin
     float horizontalPadding = borderWidth + (7.0f * pxToPt); // Minimal left/right padding
     float verticalPadding = 0.0f;
-    float minWidth = 50.0f; // Minimum width
+    float minWidth = 15.0f; // Minimum width
     float minHeight = (float)fontSize + extraLeading; // Minimum height for one line
 
     float requiredWidth = maxLineWidth + horizontalPadding;
@@ -1239,7 +1239,7 @@ static void ContentsChanged(EditAnnotationsWindow* ew) {
         KillTimer(win->hwndCanvas, gMainWindowRerenderTimer);
         gMainWindowRerenderTimer = 0;
     }
-    UINT timeoutInMs = 50;
+    UINT timeoutInMs = 250;
     gMainWindowForRender = win;
     gMainWindowRerenderTimer = SetTimer(win->hwndCanvas, 1, timeoutInMs, [](HWND, UINT, UINT_PTR, DWORD) {
         if (IsMainWindowValid(gMainWindowForRender)) {
