@@ -177,11 +177,15 @@ struct EditAnnotationsWindow : Wnd {
 
     void OnSize(UINT msg, UINT type, SIZE size) override;
     void OnFocus() override;
+    void OnTimer(UINT_PTR event_id) override;
     bool PreTranslateMessage(MSG&) override;
 
     void ListBoxSelectionChanged();
 
     ~EditAnnotationsWindow();
+
+    bool commitDirty = false;
+    UINT_PTR commitTimerId = 0;
 };
 
 // Forward declarations
@@ -191,6 +195,12 @@ static bool ShouldPositionEditAnnotLeft(WindowTab* tab);
 static void PositionEditAnnotationsWindowLeft(EditAnnotationsWindow* ew);
 static void PositionEditAnnotationsWindowRight(EditAnnotationsWindow* ew);
 static fz_font* GetCachedFont(fz_context* ctx, const char* fontName);
+static void AutoResizeFreeTextAnnotation(Annotation* annot, const char* text);
+static void StopPendingContentsCommitTimer(EditAnnotationsWindow* ew);
+static void CommitPendingContentsEdit(EditAnnotationsWindow* ew);
+
+static constexpr UINT_PTR kAnnotCommitTimerId = 1;
+static constexpr UINT kAnnotCommitDelayMs = 400;
 
 #if 0
 static Annotation* PickNewSelectedAnnotation(EditAnnotationsWindow* ew, int prevIdx) {
@@ -342,6 +352,8 @@ bool CloseAndDeleteEditAnnotationsWindow(WindowTab* tab) {
 }
 
 EditAnnotationsWindow::~EditAnnotationsWindow() {
+    CommitPendingContentsEdit(this);
+    StopPendingContentsCommitTimer(this);
     // hacky: we want the position of the main window
     // but the size of client area
     tab->lastEditAnnotsWindowPos = WindowRect(hwnd);
@@ -419,6 +431,7 @@ void EditAnnotationsWindow::OnFocus() {
 extern bool SaveAnnotationsToMaybeNewPdfFile(WindowTab*);
 
 static void ButtonSaveToNewFileHandler(EditAnnotationsWindow* ew) {
+    CommitPendingContentsEdit(ew);
     WindowTab* tab = ew->tab;
     bool ok = SaveAnnotationsToMaybeNewPdfFile(tab);
     if (!ok) {
@@ -429,6 +442,7 @@ static void ButtonSaveToNewFileHandler(EditAnnotationsWindow* ew) {
 extern bool SaveAnnotationsToExistingFile(WindowTab* tab);
 
 static void ButtonSaveToCurrentPDFHandler(EditAnnotationsWindow* ew) {
+    CommitPendingContentsEdit(ew);
     SaveAnnotationsToExistingFile(ew->tab);
 }
 
@@ -497,10 +511,6 @@ static PdfColor GetDropDownColor(const char* sv) {
     ParseColor(col, sv);
     return col.pdfCol;
 }
-
-// Forward declaration for auto-resize function
-static void AutoResizeFreeTextAnnotation(Annotation* annot, const char* text);
-
 
 // TODO: mupdf shows it in 1.6 but not 1.7. Why?
 bool gShowRect = true;
@@ -1074,12 +1084,10 @@ void EditAnnotationsWindow::ListBoxSelectionChanged() {
         ReportDebugIf(true);
         return;
     }
+    CommitPendingContentsEdit(this);
     Annotation* annot = annotations.at(itemNo);
     SetSelectedAnnotation(tab, annot, false);
 }
-
-static UINT_PTR gMainWindowRerenderTimer = 0;
-static MainWindow* gMainWindowForRender = nullptr;
 
 static const char* MapAnnotFontToBase14(const char* pdfFontName) {
     if (str::IsEmptyOrWhiteSpace(pdfFontName)) {
@@ -1214,6 +1222,42 @@ static void AutoResizeFreeTextAnnotation(Annotation* annot, const char* text) {
     }
 }
 
+static void StopPendingContentsCommitTimer(EditAnnotationsWindow* ew) {
+    if (ew && ew->commitTimerId != 0) {
+        KillTimer(ew->hwnd, ew->commitTimerId);
+        ew->commitTimerId = 0;
+    }
+}
+
+static void CommitPendingContentsEdit(EditAnnotationsWindow* ew) {
+    if (!ew || !ew->commitDirty || !ew->tab) {
+        return;
+    }
+    StopPendingContentsCommitTimer(ew);
+    ew->commitDirty = false;
+
+    Annotation* annot = ew->tab->selectedAnnotation;
+    if (!annot) {
+        return;
+    }
+    DisplayModel* dm = ew->tab->AsFixed();
+    if (!dm) {
+        return;
+    }
+    EngineMupdf* engine = AsEngineMupdf(dm->GetEngine());
+    if (!engine || annot->engine != engine) {
+        return;
+    }
+
+    TempStr txt = ew->editContents ? ew->editContents->GetTextTemp() : nullptr;
+    txt = str::ReplaceTemp(txt, "\r\n", "\n");
+    SetContents(annot, txt);
+    if (annot->type == AnnotationType::FreeText) {
+        AutoResizeFreeTextAnnotation(annot, txt);
+    }
+    MainWindowRerender(ew->tab->win);
+}
+
 // TODO: there seems to be a leak
 static void ContentsChanged(EditAnnotationsWindow* ew) {
     auto a = ew->tab->selectedAnnotation;
@@ -1222,34 +1266,12 @@ static void ContentsChanged(EditAnnotationsWindow* ew) {
     if (!a) {
         return;
     }
-    auto txt = ew->editContents->GetTextTemp();
-    txt = str::ReplaceTemp(txt, "\r\n", "\n");
-    SetContents(a, txt);
-
-    // Auto-resize FreeText annotations immediately to avoid stale selection timing issues
-    if (a->type == AnnotationType::FreeText) {
-        AutoResizeFreeTextAnnotation(a, txt);
-    }
 
     EnableSaveIfAnnotationsChanged(ew);
 
-    MainWindow* win = ew->tab->win;
-    if (gMainWindowRerenderTimer != 0) {
-        // logf("ContentsChanged: killing existing timer for re-render of MainWindow\n");
-        KillTimer(win->hwndCanvas, gMainWindowRerenderTimer);
-        gMainWindowRerenderTimer = 0;
-    }
-    UINT timeoutInMs = 250;
-    gMainWindowForRender = win;
-    gMainWindowRerenderTimer = SetTimer(win->hwndCanvas, 1, timeoutInMs, [](HWND, UINT, UINT_PTR, DWORD) {
-        if (IsMainWindowValid(gMainWindowForRender)) {
-            // logf("ContentsChanged: re-rendering MainWindow\n");
-            MainWindowRerender(gMainWindowForRender);
-        } else {
-            // logf("ContentsChanged: NOT re-rendering MainWindow because is not valid anymore\n");
-        }
-        gMainWindowRerenderTimer = 0;
-    });
+    ew->commitDirty = true;
+    StopPendingContentsCommitTimer(ew);
+    ew->commitTimerId = SetTimer(ew->hwnd, kAnnotCommitTimerId, kAnnotCommitDelayMs, nullptr);
 }
 
 void EditAnnotationsWindow::OnSize(UINT msg, UINT, SIZE size) {
@@ -1270,6 +1292,13 @@ void EditAnnotationsWindow::OnSize(UINT msg, UINT, SIZE size) {
         return;
     }
     LayoutToSize(mainLayout, {dx, dy});
+}
+
+void EditAnnotationsWindow::OnTimer(UINT_PTR event_id) {
+    if (event_id != kAnnotCommitTimerId) {
+        return;
+    }
+    CommitPendingContentsEdit(this);
 }
 
 static Static* CreateStatic(HWND parent, const char* s = nullptr) {
