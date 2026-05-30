@@ -1140,6 +1140,15 @@ static void PaintPageFrameAndShadow(HDC hdc, Rect& bounds, Rect&, bool) {
     ScopedSelectObject restoreBrush(hdc, brush);
     Rectangle(hdc, bounds.x, bounds.y, bounds.x + bounds.dx + 1, bounds.y + bounds.dy + 1);
 }
+
+static void PaintPageBorder(HDC hdc, Rect pageRect) {
+    COLORREF bgCol = ThemeMainWindowBackgroundColor();
+    COLORREF borderCol = AdjustLightness2(bgCol, GetLightness(bgCol) > 128 ? -35.0f : 35.0f);
+    AutoDeletePen pen(CreatePen(PS_SOLID, 1, borderCol));
+    ScopedSelectPen restorePen(hdc, pen);
+    ScopedSelectObject restoreBrush(hdc, GetStockBrush(HOLLOW_BRUSH));
+    Rectangle(hdc, pageRect.x, pageRect.y, pageRect.x + pageRect.dx + 1, pageRect.y + pageRect.dy + 1);
+}
 #endif
 
 /* debug code to visualize links (can block while rendering) */
@@ -1377,6 +1386,11 @@ static bool DrawDocument(MainWindow* win, HDC hdc, RECT* rcArea) {
 
         bool renderOutOfDateCue = false;
         int renderDelay = gRenderCache->Paint(hdc, bounds, dm, pageNo, pageInfo, &renderOutOfDateCue);
+#ifndef DRAW_PAGE_SHADOWS
+        if (!dm->GetEngine()->IsImageCollection() && !win->presentation) {
+            PaintPageBorder(hdc, pageInfo->pageOnScreen);
+        }
+#endif
         if (renderDelay == 0) {
             shouldPaint = true;
         }
