@@ -1514,6 +1514,11 @@ static LRESULT OnSetCursorMouseNone(MainWindow* win, HWND hwnd) {
         win->DeleteToolTip();
         return TRUE;
     }
+    if (pageEl->Is(kindPageElementComment)) {
+        SetTextOrArrorCursor(dm, pt);
+        win->DeleteToolTip();
+        return TRUE;
+    }
     char* text = pageEl->GetValue();
     if (!dm->ValidPageNo(pageNo)) {
         const char* kind = pageEl->GetKind();
